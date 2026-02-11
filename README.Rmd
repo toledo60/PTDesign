@@ -1,0 +1,28 @@
+---
+output: github_document
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.path = "man/figures/README-",
+  out.width = "100%"
+)
+```
+
+# PTDesign
+
+<!-- badges: start -->
+<!-- badges: end -->
+
+
+## Installation
+
+You can install the development version of PTDesign from [GitHub](https://github.com/toledo60/PTDesign) with:
+
+```{r,eval=FALSE}
+if (!require("pak")) install.packages("pak")
+pak::pak("toledo60/PTDesign")
+```
+

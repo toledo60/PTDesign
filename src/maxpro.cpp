@@ -1,15 +1,9 @@
 #include <Rcpp.h>
 #include <random>
+#include "utils.h"
 
 using namespace std;
 using namespace Rcpp;
-
-NumericMatrix initialize_numMat(const vector<double>& sched, int n, int k, int index) {
-    NumericMatrix result(n, k);
-    const double* source_block = sched.data() + std::size_t(index) * n * k;
-    std::memcpy( REAL(result),source_block, sizeof(double) * n * k );
-    return result;
-}
 
 double psi(const double* D, int n, int k){
     double summation = 0.0;

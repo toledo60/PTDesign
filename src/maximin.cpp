@@ -1,6 +1,7 @@
 #include <random>
 #include <Rcpp.h>
 #include <vector>
+#include "utils.h"
 
 using namespace std;
 using namespace Rcpp;
@@ -9,15 +10,6 @@ struct Pair{
     int index;
     double Φ;
 };
-
-NumericMatrix initialize_numMat(const vector<double>& sched, int n, int k, int index) {
-    NumericMatrix result(n, k);
-
-    const double* source_block = sched.data() + size_t(index) * n * k;
-    memcpy( REAL(result),source_block, sizeof(double) * n * k );
-
-    return result;
-}
 
 inline __attribute__((always_inline))
 double phi_recalculation(const vector<double>& des, double old_phi, int n, int k, 
@@ -239,7 +231,7 @@ List maximinLHD(int n, int k, int M, int Nmax, int Nswap, double alpha, double p
                 swap(design_sched[hn + v] , design_sched[hn + w]);
             }
 
-            curr.Φ     = Φ_old;
+            curr.Φ = Φ_old;
             curr.index = ii;
             best = Φ_old < best.Φ ? curr : best;
 

@@ -1,0 +1,17 @@
+Package: PTDesign
+Title: Parallel Tempering for Constructing a Broad Class of Experimental Designs 
+Version: 0.1
+Authors@R: c(
+    person("Jose", "Toledo Luna", email = "toledo60@proton.me", role = c("aut", "cre")),
+    person("Jaime", "Beilis", role = "aut"))
+Maintainer: Jose Toledo Luna <toledo60@proton.me>
+Description: Constructs space-filling designs and order-of-addition designs 
+    using a parallel tempering algorithm.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.3
+LinkingTo: 
+    Rcpp
+Imports: 
+    Rcpp
