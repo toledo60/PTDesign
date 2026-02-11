@@ -1,179 +1,189 @@
 #include <Rcpp.h>
 #include <random>
+#include <limits>
+#include <cstring>
+#include <numeric>
 #include "utils.h"
 
 using namespace std;
 using namespace Rcpp;
 
+
 double psi(const double* D, int n, int k){
-    double summation = 0.0;
-    for(int i = 0 ; i < n - 1 ; i++ ){
-        for(int j = i + 1 ; j < n ; j++){
-            double prod = 1.0;
-            for(int l = 0; l < k; l++)
-            {
-                double diff=  (D[l * n + i] - D[l * n + j]);
-                prod *= diff * diff;
-            }
-            summation += 1.0/prod;
-        }
+  double summation = 0.0;
+  for(int i = 0 ; i < n - 1 ; i++ ){
+    for(int j = i + 1 ; j < n ; j++){
+      double prod = 1.0;
+      for(int l = 0; l < k; l++){
+        double diff = (D[l * n + i] - D[l * n + j]);
+        prod *= diff * diff;
+      }
+      // Optional safety: if prod hits 0, psi is infinite
+      if (prod <= 0.0) return std::numeric_limits<double>::infinity();
+      summation += 1.0 / prod;
     }
-    return pow(2.0/(n * (n - 1)) * summation, (double)1.0/k);
+  }
+  return std::pow(2.0/(n * (n - 1)) * summation, 1.0 / (double)k);
 }
 
 // [[Rcpp::export]]
-List MaxProLHD(int n, int k, int M, int Nmax, int Nswap, int tolerance,  NumericVector temp_sched){
+List MaxProLHD(int n, int k, int M, int Nmax, int Nswap, int tolerance, NumericVector temp_sched){
 
-    // start the RNG
-    mt19937_64 RNG_engine{random_device{}()};
-    uniform_int_distribution<int> distSwap(0, M-2); // for choosing random swap
-    uniform_int_distribution<int> distCol(0, k-1); // for choosing random col
-    uniform_int_distribution<int> distRow(0, n-1); // for choosing random row
-    uniform_real_distribution<> dist(0.0, 1.0); // for choosing uniformly distributed prob
+  mt19937_64 RNG_engine{random_device{}()};
+  uniform_int_distribution<int> distSwap(0, M-2);
+  uniform_int_distribution<int> distCol(0, k-1);
+  uniform_int_distribution<int> distRow(0, n-1);
+  uniform_real_distribution<> dist(0.0, 1.0);
 
-    ////////////////////// Initialize random design ///////////////////////
+  vector<int> klist(n);
+  iota(klist.begin(), klist.end(), 1);
 
-    vector<int> klist(n);
-    iota(klist.begin(),klist.end(),1); // fill 1:k
+  vector<double> D0(size_t(n) * k);
 
-    // Column major matrix: element i,j (row/column) are accessed as D0[j * n + i]
-    double D0[n * k];
-
-    for(int j = 0; j < k; j++){
-        for(int i = n - 1; i >= 0; --i){
-            // shuffle the integers
-            uniform_int_distribution<int> shuffler(0, i);
-            swap(klist[i], klist[shuffler(RNG_engine)]);
-            D0[j * n + i] = (klist[i] - 0.5)/n;
-        }
+  for(int j = 0; j < k; j++){
+    for(int i = n - 1; i >= 0; --i){
+      uniform_int_distribution<int> shuffler(0, i);
+      swap(klist[i], klist[shuffler(RNG_engine)]);
+      D0[size_t(j) * n + i] = (klist[i] - 0.5) / n;
     }
-    /////////////////////// End random design initialization //////////////
+  }
 
-    double psi0 = psi(D0, n, k);
+  double psi0 = psi(D0.data(), n, k);
 
-    //////////////////// Make full replica schedule //////////////////////
+  vector<double> design_sched;
+  design_sched.resize(size_t(M) * n * k);
 
-    vector<double> design_sched;
-    // allocate M nk doubles
-    design_sched.resize(size_t(M) * n * k);
-    vector<double> psi_sched;
+  vector<double> psi_sched;
+  psi_sched.resize(M);
 
-    // Fill in lists 1 through M of design configurations
-    // psi is kept here to avoid unnecessary recomputation
-    for(int i = 0; i < M; i++){
-        double * predestination = design_sched.data() + size_t(i) * n * k;
-        memcpy(predestination, D0, sizeof(double) * n * k);
-        psi_sched.push_back(psi0);
-    }
+  for(int ii = 0; ii < M; ii++){
+    double* predestination = design_sched.data() + size_t(ii) * n * k;
+    std::memcpy(predestination, D0.data(), sizeof(double) * n * k);
+    psi_sched[ii] = psi0;
+  }
 
-    //////////////////// End of replica schedule generation ////////////
+  double best_psi = psi0;
+  vector<double> best_design(size_t(n) * k);
+  std::memcpy(best_design.data(), D0.data(), sizeof(double) * n * k);
 
-    int unsuccessful_global_min = 0;
-    int global_min_index = 0;
+  int since_best = 0;
+  int iters_done = Nmax;
 
-    ///////////////////// Run the PT algorithm ////////////////////
-    for(int iter = 0; iter < Nmax; iter++){
+  for(int iter = 0; iter < Nmax; iter++){
 
-        ///////////// Metropolis algorithm ///////////////////////
-        for(int ii = 0; ii < M; ii++){
+    bool improved_best_this_iter = false;
 
-            // double* D = design_sched[ii * n * k + i * k + j];
+    ///////////// Metropolis within each replica ///////////////////////
+    for(int ii = 0; ii < M; ii++){
 
-            // choose perturbation rows and column
-            int h = distCol(RNG_engine);
-            int w = distRow(RNG_engine);
-            int v;
-            do { // ensure distinction between indices
-                v = distRow(RNG_engine);
-            } while (v == w);
+      int h = distCol(RNG_engine);
+      int w = distRow(RNG_engine);
+      int v;
+      do { v = distRow(RNG_engine); } while (v == w);
 
-            // recalculate psi
-            double psi_original = psi_sched[ii];
+      double psi_original = psi_sched[ii];
+      const int block = (ii * n * k);
 
-            //////////////////// psi RECALCULATION ///////////////////////////////
+      //////////////////// Fast psi update ///////////////////////////////
+      double summation = 0.0;
 
-            // keep track of the memory block of the matrix
-            int block = (ii * n * k);
+      for(int i = 0; i < n; i++){
+        if(!(i == w || i == v)){
+          double prod1 = 1.0;
+          double prod2 = 1.0;
 
-            double summation = 0.0;
-            for(int i = 0; i < n; i++){
-                if(!(i == w || i == v)){
-                    double prod1 = 1.0;
-                    double prod2 = 1.0;
-                    for(int l = 0; l < k ; l++)
-                    {
-                        double variable = design_sched[block + l * n + i];
-                        double diff1 = (design_sched[block + l * n + w] - variable);
-                        double diff2 = (design_sched[block + l * n + v] - variable);
+          for(int l = 0; l < k ; l++){
+            double variable = design_sched[block + l * n + i];
+            double diff1 = (design_sched[block + l * n + w] - variable);
+            double diff2 = (design_sched[block + l * n + v] - variable);
 
-                        prod1 *= diff1 * diff1;
-                        prod2 *= diff2 * diff2;
-                    }
-                    double affected_col = design_sched[block + h * n + i];
-                    double delta_v = design_sched[block + h * n + v] - affected_col;
-                    double delta_w = design_sched[block + h * n + w] - affected_col;
-                    double replacement = (delta_v * delta_v)/(delta_w * delta_w);
-                    summation +=
-                    (
-                        // w term
-                        1.0/(prod1 * replacement) - 1.0/prod1
-                        +
-                        // v term
-                        1.0/(prod2 * (1.0/replacement))  - 1.0/prod2
-                    );
-                }
-            }
-            double psi_try = pow(2.0/(n *(n-1)) * ((n * (n-1) * 0.5) * pow(psi_original, (double)k) + summation), (double)1.0/k);
+            prod1 *= diff1 * diff1;
+            prod2 *= diff2 * diff2;
+          }
 
-            /////////////////// psi RECALCULATION END ////////////////////////////////
-
-            if(psi_try < psi_original)
-            {
-                // accept the perturbation of the design
-                swap(design_sched[block +  h * n + w], design_sched[block + h * n + v]);
-                // the psi designated becomes that of the perturbed design
-                psi_sched[ii] = psi_try;
-
-                // check if psi_try is the global minimum
-                if(psi_try < psi0){
-                    psi0 = psi_try;
-                    unsuccessful_global_min = 0;
-                    global_min_index = ii;
-                }
-
-            }else if(dist(RNG_engine) <= exp(-(psi_try - psi_original)/temp_sched[ii])){
-                swap(design_sched[block +  h * n + w], design_sched[block + h * n + v]);
-                psi_sched[ii] = psi_try;
-                if(ii == global_min_index){
-                    psi0 = psi_try;
-                }
-            }
-        }
-        ////////////// Swap configuration ///////////////////////
-    
-        if((iter + 1) % Nswap == 0){
-            int q = distSwap(RNG_engine);
-            double psi1 = psi_sched[q];
-            double psi2 = psi_sched[q+1];
-            double t1 = temp_sched[q];
-            double t2 = temp_sched[q+1];
-
-            if(dist(RNG_engine) <= exp((psi2 - psi1) * (1/t2 - 1/t1))){
-                swap(temp_sched[q], temp_sched[q+1]);
-            }
-        }
-        /////////////// End of configuration swap ///////////////
-
-        if(++unsuccessful_global_min > tolerance && iter > 5000){
-            Nmax = iter;
+          if (prod1 <= 0.0 || prod2 <= 0.0) {
+            summation = std::numeric_limits<double>::infinity();
             break;
+          }
+
+          double affected_col = design_sched[block + h * n + i];
+          double delta_v = design_sched[block + h * n + v] - affected_col;
+          double delta_w = design_sched[block + h * n + w] - affected_col;
+
+          // Avoid division by zero if delta_w == 0
+          if (delta_w == 0.0) {
+            summation = std::numeric_limits<double>::infinity();
+            break;
+          }
+
+          double replacement = (delta_v * delta_v) / (delta_w * delta_w);
+
+          summation += ( 1.0/(prod1 * replacement) - 1.0/prod1
+                       + 1.0/(prod2 * (1.0/replacement)) - 1.0/prod2 );
         }
+      }
+
+      double psi_try;
+      if (!std::isfinite(summation)) {
+        psi_try = std::numeric_limits<double>::infinity();
+      } else {
+        double base = (n * (n - 1) * 0.5) * std::pow(psi_original, (double)k) + summation;
+        double scaled = 2.0 / (n * (n - 1)) * base;
+        psi_try = (scaled > 0.0) ? std::pow(scaled, 1.0 / (double)k)
+                                : std::numeric_limits<double>::infinity();
+      }
+      /////////////////// End fast psi update ////////////////////////////////
+
+      bool accept = false;
+      if (psi_try < psi_original) {
+        accept = true;
+      } else {
+        double a = std::exp(-(psi_try - psi_original) / temp_sched[ii]);
+        if (dist(RNG_engine) <= a) accept = true;
+      }
+
+      if (accept) {
+        // apply swap in the chosen column
+        std::swap(design_sched[block + h * n + w], design_sched[block + h * n + v]);
+        psi_sched[ii] = psi_try;
+
+        // BEST-EVER check (across all replicas)
+        if (psi_try < best_psi) {
+          best_psi = psi_try;
+          improved_best_this_iter = true;
+
+          const double* src = design_sched.data() + size_t(ii) * n * k;
+          std::memcpy(best_design.data(), src, sizeof(double) * n * k);
+        }
+      }
     }
-    //////////////////// End of the PT algorithm //////////////////
-    return List::create(
-            Named("design") = initialize_numMat(design_sched,n,k,global_min_index),
-            Named("measure") = psi0,
-            Named("t0") = temp_sched,
-            Named("ntotal") = Nmax
-    );
+    ////////////// Swap temperatures //////////////////
+    if((iter + 1) % Nswap == 0){
+      int q = distSwap(RNG_engine);
+      double psi1 = psi_sched[q];
+      double psi2 = psi_sched[q+1];
+      double t1 = temp_sched[q];
+      double t2 = temp_sched[q+1];
+
+      if(dist(RNG_engine) <= std::exp((psi2 - psi1) * (1.0/t2 - 1.0/t1))){
+        std::swap(temp_sched[q], temp_sched[q+1]);
+      }
+    }
+    //////////////////////////////////////////////////////////////////////////////
+
+    if (improved_best_this_iter) since_best = 0;
+    else ++since_best;
+
+    if (iter > 5000 && since_best > tolerance) {
+      iters_done = iter + 1;
+      break;
+    }
+  }
+
+  return List::create(
+    Named("design")  = initialize_numMat_from_vec(best_design, n, k),
+    Named("measure") = best_psi,
+    Named("t0")      = temp_sched,
+    Named("ntotal")  = iters_done
+  );
 }

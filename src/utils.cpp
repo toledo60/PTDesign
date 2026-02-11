@@ -9,3 +9,9 @@ NumericMatrix initialize_numMat(const vector<double>& sched, int n, int k, int i
     std::memcpy( REAL(result),source_block, sizeof(double) * n * k );
     return result;
 }
+
+NumericMatrix initialize_numMat_from_vec(const vector<double>& block, int n, int k) {
+  NumericMatrix result(n, k);
+  std::memcpy(REAL(result), block.data(), sizeof(double) * n * k);
+  return result;
+}
