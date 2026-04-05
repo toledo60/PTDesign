@@ -3,7 +3,7 @@ maxpro_temps <- function(n, k, M, alpha) {
   crit2 <- (1.0 / ((n - 1)^(k - 1) * (n - 2)))^(1.0 / k)
   delta0 <- crit2 - crit1
   T0 <- -delta0 * (1.0 / log(0.99))
-  return(sapply(0:(M - 1), function(i) T0 * alpha^(M - i)))
+  sapply(0:(M - 1), function(i) T0 * alpha^((M - 1) - i))
 }
 
 #' Maximum Projection Latin Hypercube Designs

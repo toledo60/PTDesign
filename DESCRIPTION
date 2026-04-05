@@ -1,6 +1,6 @@
 Package: PTDesign
 Title: Parallel Tempering for Constructing a Broad Class of Experimental Designs 
-Version: 0.1.1
+Version: 0.1.2
 Authors@R: c(
     person("Jose", "Toledo Luna", email = "toledo60@proton.me", role = c("aut", "cre")),
     person("Jaime", "Beilis", role = "aut"))
