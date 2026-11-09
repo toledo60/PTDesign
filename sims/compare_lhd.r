@@ -146,7 +146,8 @@ maxpro_compare <- rbind(pt_maxpro_default, maxpro_default)
 
 p1 <- compare_methods_lhd(maxpro_compare, 
   colors = c(PT = "#F8766D", MaxPro = "#00BFC4"),
-  digits = 0.1)
+  digits = 0.1) &
+  labs(x = expression(Psi["measure"]))
 
 ggsave(
   filename = here::here("sims", "figs", "pt_maxpro_compare.png"),
@@ -168,10 +169,10 @@ slhd_compare <- rbind(pt_maximin_default, slhd_default)
 
 p2 <- compare_methods_lhd(slhd_compare, 
   colors = c(PT = "#F8766D", SLHD = "#00BFC4"),
-  digits = 0.00001)
+  digits = 0.00001) &
+  labs(x = expression(phi[p] ~ "measure"))
 p2
 
 ggsave(
   filename = here::here("sims", "figs", "pt_slhd_compare.png"),
   plot = p2, height = 7,width = 9, units = "in")
-m
