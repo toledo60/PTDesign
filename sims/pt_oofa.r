@@ -65,6 +65,51 @@ plot_m <- function(m_val, data) {
     )
 }
 
+compare_methods_plot <- function(m_val, data) {
+  ggplot(
+    filter(data, m == m_val),
+    aes(
+      x = n,
+      y = measure,
+      color = factor(method),
+      linetype = factor(method),
+      shape = factor(method)
+    )
+  ) +
+    geom_line() +
+    geom_point() +
+    scale_color_manual(
+      values = c(
+        "#0a0a0a", #black
+        "#5ca7ed", # blue
+        "#D55E00", # red
+        "#45e69b", # green
+        "#E69F00", # orange
+        "#CC79A7", # pink
+        "#56B4E9", # light blue
+        "#F0E442" # yellow
+      )
+    ) +
+    scale_linetype_manual(
+      values = c("solid", "dashed", "twodash", "dotted", "dotdash")
+    ) +
+    scale_shape_manual(values = c(16, 17, 15, 3, 7)) + # circle, triangle, square, plus, cross
+    labs(
+      title = paste0("Maximin (m=", m_val, ")"),
+      x = "Run Size (n)",
+      color = "method",
+      linetype = "method",
+      shape = "method"
+    ) +
+    theme_bw(base_size = 12) +
+    theme(
+      legend.position = "bottom",
+      legend.box = "horizontal",
+      panel.grid.minor = element_blank(),
+      plot.title = element_text(face = "bold", hjust = 0.5)
+    )
+}
+
 min_zero <- function(x) min(x[x!=0],na.rm = TRUE)
 
 replicate_sims_oofa <- function(row, n_rep = 100, tolerance = 5000) {
@@ -106,27 +151,76 @@ result <- do.call(
 reps <- 100
 dat <- do.call(rbind, replicate(reps, result, simplify = FALSE))
 
-n_cores <- detectCores() - 1
+n_cores <- max(1, detectCores() - 1)
+cl <- makeCluster(n_cores, type = "PSOCK")
 
-measures <- mclapply(
-  1:nrow(dat), 
-  function(i){
-    maximin_oofa(n=dat$n[i], k = dat$m[i], 
-      num_chains = dat$n_chains[i], alpha = dat$alpha[i],
-      no_improvement = 5000)$measure
-  },
-  mc.cores = n_cores
+clusterEvalQ(cl, library(PTDesign))
+clusterExport(cl, "dat")
+
+sim_results <- tryCatch(
+  parLapply(
+    cl,
+    seq_len(nrow(dat)),
+    function(i) {
+      res <- PTDesign::maximin_oofa(
+        n = dat$n[i],
+        k = dat$m[i],
+        num_chains = dat$n_chains[i],
+        alpha = dat$alpha[i],
+        no_improvement = 5000
+      )
+
+      list(
+        measure = res$measure,
+        design = res$design
+      )
+    }
+  ),
+  finally = stopCluster(cl)
 )
 
-measures <- unlist(measures)
-final_dat <- cbind(dat, measure = measures)
+final_dat <- dat |>
+  mutate(
+    measure = vapply(
+      sim_results,
+      `[[`,
+      numeric(1),
+      "measure"
+    )
+  )
 
-saveRDS(final_dat, file = here::here("sims","data","PT_maximinOofA_sim.rds"))
+# Select best replication per configuration
+best_indices <- final_dat |>
+  mutate(row_id = row_number()) |>
+  filter(is.finite(measure)) |>
+  group_by(m, n, alpha, n_chains) |>
+  slice_min(measure, n = 1, with_ties = FALSE) |>
+  ungroup()
+
+
+best_designs <- best_indices |>
+  mutate(
+    design = lapply(
+      row_id,
+      function(i) sim_results[[i]]$design
+    )
+  ) |>
+  select(m, n, alpha, n_chains, measure, design)
+
+saveRDS(
+  final_dat,
+  here::here("sims", "data", "PT_maximinOofA_sim2.rds")
+)
+
+saveRDS(
+  best_designs,
+  here::here("sims", "data", "PT_maximinOofA_best_designs.rds")
+)
 
 
 # Figure: OofA(n,m) with m = 8:10, (n = 2m, 4m,..,10m) -------------------
 
-dat <- readRDS(file = here::here("sims","data","PT_maximinOofA_sim.rds"))
+dat <- readRDS(file = here::here("sims","data","PT_maximinOofA_sim2.rds"))
 
 summary_dat <- dat |>
   filter(if_all(where(is.numeric), ~ !is.infinite(.))) |>
@@ -162,28 +256,25 @@ ggsave(
 
 meta_dat <- readRDS(here::here("sims","data","meta_maximin_m8-10.rds"))
 
-pt_dat <- readRDS(file = here::here("sims","data","PT_maximinOofA_sim.rds"))
-fig_dat <- pt_dat |>
-  filter(alpha %in% c(0.5, 0.7, 0.9), n_chains %in% c(7, 11, 15)) |>
-  as_tibble()
-
 meta_dat <- meta_dat |> 
   filter(method %in% c("DE1","PSO1")) |> 
   mutate(method = factor(sub("1$","",method))) |> 
   rename(run_sizes = n, 
     avg_min_l2_dist = value)
 
-pt_dat <- pt_dat |> 
+pt_dat <- summary_dat |> 
   filter(alpha == 0.7 & n_chains == 11) |> 
-  mutate(method = factor("PT")) |> 
-  select(m,run_sizes,method,avg_min_l2_dist)
+  mutate(method = factor("PT"))
+
 
 compare_dat1 <- bind_rows(pt_dat, meta_dat)
 
-fig_compare_oofa <- compare_methods_plot(8, compare_dat1)+
-compare_methods_plot(9, compare_dat1)+
-compare_methods_plot(10, compare_dat1)+
-    plot_layout(guides = "collect", ncol=3) & theme(legend.position = "bottom")
+fig_compare_oofa <- compare_methods_plot(8, compare_dat1) +
+  compare_methods_plot(9, compare_dat1) +
+  compare_methods_plot(10, compare_dat1) +
+  plot_layout(guides = "collect", ncol = 3) &
+  labs(y = expression(phi[p] ~ "measure")) &
+  theme(legend.position = "bottom")
 
 ggsave(here::here("sims","figs","compare_methods_oofa.png"), 
     plot = fig_compare_oofa, width =9, height = 5, units="in")
