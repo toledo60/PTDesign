@@ -1,10 +1,6 @@
 
 # PTDesign
 
-<!-- badges: start -->
-
-<!-- badges: end -->
-
 ## Installation
 
 You can install the development version of PTDesign from

@@ -13,9 +13,6 @@ knitr::opts_chunk$set(
 
 # PTDesign
 
-<!-- badges: start -->
-<!-- badges: end -->
-
 
 ## Installation
 
